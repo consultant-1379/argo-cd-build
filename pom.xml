@@ -1,0 +1,61 @@
+
+<?xml version="1.0" encoding="UTF-8"?>
+<!--~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ ~ COPYRIGHT Ericsson 2023
+ ~
+ ~
+ ~
+ ~ The copyright to the computer program(s) herein is the property of
+ ~
+ ~ Ericsson Inc. The programs may be used and/or copied only with written
+ ~
+ ~ permission from Ericsson Inc. or in accordance with the terms and
+ ~
+ ~ conditions stipulated in the agreement/contract under which the
+ ~
+ ~ program(s) have been supplied.
+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~-->
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.ericsson.mlops</groupId>
+    <artifactId>license-check</artifactId>
+    <version>1</version>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>com.mycila</groupId>
+                <artifactId>license-maven-plugin</artifactId>
+                <version>4.1</version>
+                <configuration>
+                  <properties>
+                    <owner>Mycila</owner>
+                    <email>mathieu.carbou@gmail.com</email>
+                  </properties>
+                  <licenseSets>
+                    <licenseSet>
+                        <header>config/license/copyright-2024.txt</header>
+                        <validHeaders>
+                         <!-- <validHeader>config/license/copyright-2023.txt</validHeader>
+                              <validHeader>config/license/copyright-2022.txt</validHeader>
+                              <validHeader>config/license/copyright-2021.txt</validHeader> -->
+                        </validHeaders>
+                      <includes>
+                        <include>charts/**</include>
+                        <include>config/**/*.yaml</include>
+                        <include>ci/scripts/*.sh</include>
+                      </includes>
+                      <excludes>
+                        <exclude>charts/**/*.tpl</exclude>
+                        <exclude>charts/**/.helmignore</exclude>
+                      </excludes>
+                      <headerDefinitions>
+                        <headerDefinition>./config/license/javaHeaderDefinition.xml</headerDefinition>
+                        <headerDefinition>./config/license/xmlHeaderDefinition.xml</headerDefinition>
+                    </headerDefinitions>
+                    </licenseSet>
+                  </licenseSets>
+                </configuration>
+              </plugin>
+        </plugins>
+    </build>
+  </project>

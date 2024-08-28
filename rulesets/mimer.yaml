@@ -1,0 +1,102 @@
+#
+# COPYRIGHT Ericsson 2022
+#
+#
+#
+# The copyright to the computer program(s) herein is the property of
+#
+# Ericsson Inc. The programs may be used and/or copied only with written
+#
+# permission from Ericsson Inc. or in accordance with the terms and
+#
+# conditions stipulated in the agreement/contract under which the
+#
+# program(s) have been supplied.
+#
+
+modelVersion: 2.0
+docker-images:
+    - adp-release-auto: armdocker.rnd.ericsson.se/proj-adp-cicd-drop/bob-adp-release-auto:${env.RELEASE_AUTO_TAG}
+
+import:
+    common: common-properties.yaml
+
+properties:  # These properties are not used anywhere
+    - product-structure-file-path: config/plms/product_structure.yaml
+    - helm-artifact-path: ${common.helm-chart-released-repopath}/${common.helm-chart-name}/${common.helm-chart-name}-${var.released-version}.tgz
+    - image-manifest-path: ${common.arm_repo_path}/${common.image-released-repo-name}/${common.docker-image-name}/${env.RELEASE_CANDIDATE}/manifest.json
+    - db-init-image-manifest-path: ${common.arm_repo_path}/${common.image-released-repo-name}/${common.docker-image-name}-db-init/${env.RELEASE_CANDIDATE}/manifest.json
+    - test-image-manifest-path: ${common.arm_repo_path}/${common.image-released-repo-name}/${common.docker-image-name}-test/${env.RELEASE_CANDIDATE}/manifest.json
+
+env:
+    - DRY_RUN (default=false)
+    - RELEASE_AUTO_TAG (default=latest)
+    - RELEASE_CANDIDATE
+    # the ARM artifactory credentials
+    - SELI_ARTIFACTORY_REPO_API_KEY
+    - MUNIN_TOKEN
+    - SERVER (default=prod)
+    - ERIDOC_USERNAME
+    - ERIDOC_PASSWORD
+
+var:
+    - sha256-helm
+    - sha256-image
+    - sha256-initcontainer
+    - sha256-test-image
+    - cbos-version
+    - has-dependencies-been-modified
+    - semver
+    - release-commithash
+    - released-version
+
+rules:
+    
+    # Check if any PLM or dependency changes
+    dependencies:
+        - task: check-has-changed
+          cmd:
+              - if [ -z "$(git diff --name-status HEAD~ | grep 'fossa\|plms')" ]; then
+                echo "NO modifications have been made dependencies.";
+                echo false > .bob/var.has-dependencies-been-modified;
+                else
+                echo "There has been modifications made to the dependencies.";
+                echo true > .bob/var.has-dependencies-been-modified;
+                fi
+              - test ${var.has-dependencies-been-modified} == true
+
+    check-foss-in-mimer-argo-cd:
+        - task: compare-foss-and-mimer
+          condition: dependencies:check-has-changed
+          docker-image: adp-release-auto
+          docker-envs:
+              - MUNIN_TOKEN
+          cmd: munin search-foss
+              -s ${env.SERVER}
+              -t ${env.MUNIN_TOKEN}
+              -d ${common.argo-cd-dependency-file-name}
+              -o build
+
+    check-foss-in-mimer-argo-cd-ui:
+        - task: compare-foss-and-mimer-ui
+          condition: dependencies:check-has-changed
+          docker-image: adp-release-auto
+          docker-envs:
+              - MUNIN_TOKEN
+          cmd: munin search-foss
+              -s ${env.SERVER}
+              -t ${env.MUNIN_TOKEN}
+              -d ${common.argo-cd-ui-dependency-file-name}
+              -o build              
+
+    check-foss-in-mimer-3pps:
+        - task: compare-foss-and-mimer
+          condition: dependencies:check-has-changed
+          docker-image: adp-release-auto
+          docker-envs:
+              - MUNIN_TOKEN
+          cmd: munin search-foss
+              -s ${env.SERVER}
+              -t ${env.MUNIN_TOKEN}
+              -d ${common.argo-cd-3pps-dependency-file-name}
+              -o build

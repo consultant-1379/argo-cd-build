@@ -1,0 +1,52 @@
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### Eclipse
+.settings
+.classpath
+.project
+.factorypath
+.mvn
+
+### VS Code ###
+.vscode/
+.metals/
+
+### BOB Temporary Files/Folders ###
+.bob.env
+.bob/
+.bob*/
+k8s-logs/
+build
+temp
+*.log
+?/
+
+### Spinnaker Temporary Properties ###
+artifact.properties
+
+#license check 
+*.tmp
+
+### Docs
+**/.generated/
+/.metadata/
+
+# DR 
+test-output
+?/.config/jgit
+charts/eric-aiml-pipeline/.helmignore
+runDr.sh 
+
+# Docker config.json
+config.json
+
+## VA Scans
+trivy_metadata.properties
+
+## Robot
+*.pyc
+test-reports/

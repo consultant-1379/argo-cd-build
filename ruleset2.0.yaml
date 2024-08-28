@@ -1,0 +1,250 @@
+#
+# COPYRIGHT Ericsson 2024
+#
+#
+#
+# The copyright to the computer program(s) herein is the property of
+#
+# Ericsson Inc. The programs may be used and/or copied only with written
+#
+# permission from Ericsson Inc. or in accordance with the terms and
+#
+# conditions stipulated in the agreement/contract under which the
+#
+# program(s) have been supplied.
+#
+
+modelVersion: 2.0
+
+description: "Declarative Deployer"
+
+# See image catalog: https://confluence.lmera.ericsson.se/display/ACD/ADP+CICD+Docker+Image+Catalog
+docker-images:
+    - adp-release-auto: armdocker.rnd.ericsson.se/proj-adp-cicd-drop/bob-adp-release-auto:${env.RELEASE_AUTO_TAG}
+
+import:
+    common: rulesets/common-properties.yaml
+    build: rulesets/build.yaml
+    3pp: rulesets/3pp.yaml
+    mimer: rulesets/mimer.yaml    
+
+# List of constants
+properties:
+    - image-dev-repopath: ${common.image-registry-path}-dev
+    - image-ci-repopath: ${common.image-registry-path}-ci-internal
+    - image-drop-repopath: ${common.image-registry-path}-drop
+
+# import environment variables (For example: Jenkins parameters)
+env:
+    - HOME
+    - PWD
+    - RELEASE (default=false)
+    - BUILD_DIR (default=./build)
+
+    # Default docker image tags
+    - RELEASE_AUTO_TAG (default=latest)
+
+# Variables, set by below tasks
+var:
+    - commithash
+    - commithash-full
+    - commit-author
+    - commit-email
+    - image-registry
+    - image-full-name-internal
+    - image-full-name
+    - image-repopath-internal
+    - image-repopath-drop
+    - pom-version
+    - revision
+    - rstate
+    - version
+    - version-prefix: VERSION_PREFIX
+    - semver
+
+rules:
+    # Clean workspace
+    clean:
+        - task: rm
+          cmd:
+              - rm -rf .bob/
+        #- rule: 3pp.clean
+
+    # Common tasks for all init rules
+    init-common:  
+        - task: version
+          docker-image: adp-release-auto
+          docker-flags:
+              - "--env RELEASE"
+          cmd: generate-version --is-release ${env.RELEASE} --output version
+        - task: rstate
+          docker-image: adp-release-auto
+          cmd: get_rstate.py ${var.version} > .bob/var.rstate
+        - task: commit
+          docker-image: adp-release-auto
+          cmd:
+              - git rev-parse --short HEAD > .bob/var.commithash
+              - git rev-parse HEAD > .bob/var.commithash-full
+              - git log -1 --format='%aN' > .bob/var.commit-author
+              - git log -1 --format='%aE' > .bob/var.commit-email
+        - task: create-temp-dir
+          cmd: mkdir -p ${env.BUILD_DIR}
+        - rule: build.init
+
+    # Dev Tasks: only used by manually publishing development/black builds by developers
+    init-dev:
+        - rule: init-common
+        - task: preliminary-revision # For example: PA1
+          cmd: RSTATE=${var.rstate} && echo P${RSTATE:2}1 > .bob/var.revision
+        - task: image-repopath-internal
+          cmd: echo "${image-dev-repopath}" | cut -f2- -d '/' > .bob/var.image-repopath-internal
+        - task: image-registry
+          cmd: echo "${image-dev-repopath}" | cut -f1 -d '/' > .bob/var.image-registry
+        - task: image-full-name-internal
+          cmd: echo "${image-dev-repopath}/${common.docker-image-name}" > .bob/var.image-full-name-internal
+        - task: image-full-name
+          cmd: echo "${image-ci-repopath}/${common.docker-image-name}" > .bob/var.image-full-name
+
+
+
+    # CI-Internal Tasks: used by CI to use as temporary storage for testing, only CI user has write access.
+    init-precodereview:
+        - rule: init-common
+        - task: preliminary-revision # For example: PA1
+          cmd: RSTATE=${var.rstate} && echo P${RSTATE:2}1 > .bob/var.revision
+        - task: image-repopath-internal
+          cmd: echo "${image-ci-repopath}" | cut -f2- -d '/' > .bob/var.image-repopath-internal
+        - task: image-registry
+          cmd: echo "${image-ci-repopath}" | cut -f1 -d '/' > .bob/var.image-registry
+        - task: image-full-name-internal
+          cmd: echo "${image-ci-repopath}/${common.docker-image-name}" > .bob/var.image-full-name-internal
+        - task: image-full-name
+          cmd: echo "${image-drop-repopath}/${common.docker-image-name}" > .bob/var.image-full-name
+
+    # Drop level tasks: used by CI to publish artifacts after successful CI pipeline execution for a drop build
+    init-drop:
+        - rule: init-common
+        - task: generate-semvar
+          docker-image: adp-release-auto
+          cmd: cat .bob/var.version | cut -d '-' -f 1 > .bob/var.semver
+        - task: full-revision # For example: A (Note: The Letters I O P Q R W must never be used for Document Revisioning.
+          cmd: RSTATE=${var.rstate} && echo P${RSTATE:2}1 > .bob/var.revision
+        - task: image-repopath-internal
+          cmd: echo "${image-ci-repopath}" | cut -f2- -d '/' > .bob/var.image-repopath-internal
+        - task: image-repopath-drop
+          cmd: echo "${image-drop-repopath}" | cut -f2- -d '/' > .bob/var.image-repopath-drop
+        - task: image-registry
+          cmd: echo "${image-ci-repopath}" | cut -f1 -d '/' > .bob/var.image-registry
+        - task: image-full-name-internal
+          cmd: echo "${image-ci-repopath}/${common.docker-image-name}" > .bob/var.image-full-name-internal
+        - task: image-full-name
+          cmd: echo "${image-drop-repopath}/${common.docker-image-name}" > .bob/var.image-full-name
+        - task: write-git-details
+          cmd:
+              - echo "GIT_TAG=$(git log -1 --pretty=format:'%h')" >> artifact.properties
+              - echo "GIT_COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an')" >> artifact.properties
+              - echo "GIT_COMMIT_AUTHOR_EMAIL=$(git log -1 --format='%aE')" >> artifact.properties
+              - echo "GIT_COMMIT_SUMMARY=$(git log -1 --pretty=format:'%s')" >> artifact.properties
+        - task: write-release-details
+          cmd:
+              - echo "RELEASE=${env.RELEASE}" >> artifact.properties
+    
+    # Build a docker images
+    image:
+        - rule: build.build-images
+        - rule: build.image-push-internal
+
+    # Delete docker images created
+    delete-images:
+        - rule: build.delete-images
+    
+    # Publish docker images and helm charts to drop repository
+    # Call publish only when merged to master
+    publish:
+        - rule: build.image-push
+
+    update-argo-cd-in-model-lcm:
+      - rule: build.update-argo-cd-in-model-lcm
+    
+    #lint
+    lint-license-check:
+        - rule: build.lint-license-check 
+
+    # FOSSA Handling
+    fossa-server-check:
+        - rule: 3pp.fossa-server-check
+    
+    #analyze
+    fossa-argo-cd-analyze:
+        - rule: 3pp.fossa-argo-cd-analyze
+    
+    fossa-argo-cd-ui-analyze:
+        - rule: 3pp.fossa-argo-cd-ui-analyze
+
+    #status check
+    fossa-argo-cd-scan-status-check:
+        - rule: 3pp.fossa-argo-cd-scan-status-check
+    
+    fossa-argo-cd-ui-scan-status-check:
+        - rule: 3pp.fossa-argo-cd-ui-scan-status-check
+
+    # report-attribution
+    fetch-argo-cd-fossa-report-attribution:
+        - rule: 3pp.fetch-argo-cd-fossa-report-attribution  
+
+    fetch-argo-cd-ui-fossa-report-attribution:
+        - rule: 3pp.fetch-argo-cd-ui-fossa-report-attribution
+
+
+    # dependency-update
+    dependency-argo-cd-update:
+        - rule: 3pp.dependency-argo-cd-update
+    
+    dependency-argo-cd-ui-update:
+        - rule: 3pp.dependency-argo-cd-ui-update
+
+
+    # dependency-validate
+    dependency-validate-argo-cd:
+        - rule: 3pp.dependency-validate-argo-cd
+    
+    dependency-validate-argo-cd-ui:
+        - rule: 3pp.dependency-validate-argo-cd-ui
+    
+    dependency-validate-2pps:
+        - rule: 3pp.dependency-validate-2pps
+    
+    dependency-validate-3pps:
+        - rule: 3pp.dependency-validate-3pps
+
+    # WARNING: RUN ONLY MANUALLY THIS RULE
+    bazaar-register:
+        - rule: 3pp.bazaar-register
+    license-agreement-generate:
+        - rule: 3pp.license-agreement-generate
+
+    # Generate missing product list for mimer registartion if any.
+    check-foss-in-mimer-argo-cd:
+        - rule: mimer.check-foss-in-mimer-argo-cd
+    
+    check-foss-in-mimer-argo-cd-ui:
+        - rule: mimer.check-foss-in-mimer-argo-cd-ui
+    
+    check-foss-in-mimer-3pps:
+      - rule: mimer.check-foss-in-mimer-3pps
+
+    # Create drop git tag , use light weight tag for each drop
+    # ADP version handler always creates an annotated tag, hence using git directly
+    create-drop-git-tag:
+        - task: git-tag
+          cmd: bash -c ''' 
+            tagname=v${var.version};
+            if git show-ref --tags $tagname --quiet; then
+                echo "tag exists";
+            else 
+                git tag v${var.version} ${var.commithash};
+                git push origin v${var.version};
+            fi;''' 
+
+    update-argo-cd-in-declarative-deployer:
+      - rule: build.update-argo-cd-in-declarative-deployer

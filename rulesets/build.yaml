@@ -1,0 +1,260 @@
+#
+# COPYRIGHT Ericsson 2024
+#
+#
+#
+# The copyright to the computer program(s) herein is the property of
+#
+# Ericsson Inc. The programs may be used and/or copied only with written
+#
+# permission from Ericsson Inc. or in accordance with the terms and
+#
+# conditions stipulated in the agreement/contract under which the
+#
+# program(s) have been supplied.
+#
+
+modelVersion: 2.0
+
+description: "AI/ML Pipeline Build Tasks"
+
+# See image catalog: https://confluence.lmera.ericsson.se/display/ACD/ADP+CICD+Docker+Image+Catalog
+docker-images:
+    - adp-maven-builder: armdocker.rnd.ericsson.se/proj-adp-cicd-drop/bob-java11mvnbuilder:${env.MVN_BUILDER_TAG}
+    - adp-release-auto: armdocker.rnd.ericsson.se/proj-adp-cicd-drop/bob-adp-release-auto:${env.RELEASE_AUTO_TAG}
+    - adp-image-dr-check: armdocker.rnd.ericsson.se/proj-adp-cicd-drop/adp-image-dr-check:${env.IMAGE_DR_CHECK_TAG}
+    - adp-helm-dr-check: armdocker.rnd.ericsson.se/proj-adp-cicd-drop/common-library-adp-helm-dr-check:${env.HELM_DR_CHECK_TAG}
+    - adp-go-builder: armdocker.rnd.ericsson.se/proj-adp-cicd-drop/bob-gobuilder.adp-base-os:${env.GO_BUILDER_TAG}
+    - ci-toolkit: armdocker.rnd.ericsson.se/proj-mxe-ci-internal/ci-toolkit:${env.CI_TOOLKIT_TAG}
+
+import:
+    common: common-properties.yaml
+
+properties:
+    - disabled-images-design-rules: "-DimageDesignRule.config.DR-D470203-041-A=disable -DimageDesignRule.config.DR-D470203-050-A=disable"
+    - dr-checkers-report-path: build/checker-reports
+    - image-checker-report-path: ${dr-checkers-report-path}/image
+    - declarative-deployer-repo-url: ssh://gerrit.ericsson.se:29418/MXE/declarative-deployer
+    - declarative-deployer-path: .bob/declarative-deployer
+    - declarative-deployer-version: master
+    - changed-files: ${env.PWD}/.bob/changed-files.txt    
+
+    - docker-bake-params: |
+        CBO_VERSION=\"${common.common-base-os-version}\"
+        VERSION=\"${var.version}\"
+        COMMIT=\"${var.commithash}\"
+        PWD=\"${env.PWD}\"
+        BUILD_DATE=\"${var.image-build-date}\"
+        ARGO_CD_VERSION=\"${common.argo-cd-version}\"
+        IMAGE_PRODUCT_TITLE_PREFIX=\"${common.docker-image-title}\"
+        INTERNAL_IMAGE_PREFIX=\"${var.image-full-name-internal}\"
+        DROP_IMAGE_PREFIX=\"${var.image-full-name}\"
+        ARGO_CD_IMAGE_USER_ID=\"${common.argo-cd-image-user-id}\"
+        ARGO_CD_IMAGE_PRODUCT_NUMBER=\"${common.argo-cd-image-product-number}\"   
+        ARGO_CD_IMAGE_PRODUCT_TITLE=\"${common.docker-image-title} Argo CD\"
+        ARGO_CD_IMAGE_NAME_INTERNAL=\"${var.image-full-name-internal}-argo-cd:${var.version}\"
+        ARGO_CD_IMAGE_NAME=\"${var.image-full-name}-argo-cd:${var.version}\"
+        GIT_COMMIT=\"${var.git-commit}\"
+        GIT_TAG=\"${var.git-tag}\"
+        GIT_TREE_STATE=\"${var.git-tree-state}\"
+        RSTATE=\"${var.rstate}\"        
+        NODE_VERSION=\"${common.node-version}\"
+        NPM_VERSION=\"${common.npm-version}\"
+        YARN_VERSION=\"${common.yarn-version}\"                  
+
+
+env: 
+    - HOME
+    - PWD 
+
+    # Docker
+    - BUILDKIT_PROGRESS (default=plain)
+    - DOCKER_BUILDKIT (default=1)
+
+    # Default docker image tags
+    - MVN_BUILDER_TAG (default=latest)
+    - RELEASE_AUTO_TAG (default=latest)
+    - IMAGE_DR_CHECK_TAG (default=latest)
+    - HELM_DR_CHECK_TAG (default=latest)
+    - GO_BUILDER_TAG (default=latest)
+    - CI_TOOLKIT_TAG (default=latest)
+
+    # Credentials
+    - SELI_ARTIFACTORY_REPO_USER
+    - SELI_ARTIFACTORY_REPO_PASS
+    - SELI_ARTIFACTORY_REPO_API_KEY
+    - GERRIT_USERNAME
+    - GERRIT_PASSWORD
+    - EMAIL (default=mxecifunc@ericsson.com)
+    - ARM_API_TOKEN
+    - SERO_ARM_TOKEN #SERO ARM KEY for CBOS Check
+    - SERO_ARM_USER (default=mxecifunc)
+
+    # Build Parameters
+    - CI_USER (default=mxecifunc)
+
+var:
+    - image-full-name-internal
+    - image-full-name
+    - version
+    - commithash
+    - rstate
+    - helm-chart-repo-internal
+    - image-repopath-drop
+    - version-prefix
+    - image-repopath-internal
+    - image-dr-vm-args
+    - helm-chart-check-report-warnings
+    - cbos-version
+    - cbos-semver
+    - git-commit 
+    - git-tag
+    - git-tree-state
+    - image-build-date
+
+rules:
+    # Clean workspace
+    clean:
+        - task: rm
+          cmd:
+              - rm -rf build/
+
+    init:
+        - task: image-dr-vm-args
+          cmd: echo ${disabled-images-design-rules} > .bob/var.image-dr-vm-args
+
+    lint-license-check:
+        - task: license-check
+          docker-image: adp-maven-builder
+          cmd: mvn -X license:check
+
+    add-missing-license:
+        - task: license-check
+          docker-image: adp-maven-builder
+          cmd: mvn -X license:format
+    
+    build-images:
+    - rule: clone-repo
+    - rule: bake-images
+    - rule: image-dr
+    - rule: cbo-check
+
+    clone-repo:
+    - task: clone-repo
+      cmd: bash -c '''
+            set -eux -o pipefail;
+            ${env.PWD}/ci/scripts/clone.sh --repoURL ${common.argo-cd-repo-url} --version ${common.argo-cd-version} --clone-to ${common.argo-cd-path};'''
+
+    bake-images:
+    - task: write-config
+      cmd: 
+      - echo $(date -u +'%Y-%m-%dT%H:%M:%SZ') > .bob/var.image-build-date
+      - printf "%s" "${docker-bake-params}" > ${env.PWD}/.bob/dynamic-params.hcl
+    - task: bake-images
+      cmd: docker buildx bake --load -f ${env.PWD}/images/docker-bake.hcl -f ${env.PWD}/.bob/dynamic-params.hcl --progress=plain
+
+    image-dr:
+    - task: image-dr-check
+      docker-image: adp-image-dr-check
+      docker-in-docker: socket
+      cmd: bash -c ''' 
+        set -eux;
+        mkdir -p ${image-checker-report-path};
+        images=(
+          ${var.image-full-name-internal}-argo-cd:${var.version}
+        );
+        for image in "${images[@]}"; do
+          image-dr-check --image $image --output ${image-checker-report-path} ${var.image-dr-vm-args};
+        done;'''
+    
+    cbo-check:
+    - task: cbo-check
+      docker-image: adp-release-auto
+      docker-in-docker: socket
+      cmd: bash -c ''' 
+        set -eux;
+        mkdir -p ${image-checker-report-path};
+        images=(
+          ${var.image-full-name-internal}-argo-cd:${var.version}
+        );
+        for image in "${images[@]}"; do
+          cbo-check --debug --image $image --arm-apikey ${env.ARM_API_TOKEN} --report ${image-checker-report-path};
+        done;''';
+
+
+    # build-argo-cd-image:
+    # - task: argo-cd-build
+    #   cmd: 
+    #   - echo $(date -u +'%Y-%m-%dT%H:%M:%SZ') > .bob/var.image-build-date
+    #   - docker build -f ${env.PWD}/images/argo-cd/Dockerfile
+    #         --secret id=ARM_API_TOKEN,env=ARM_API_TOKEN
+    #         --build-context entrypoint_context=${env.PWD}/images/argo-cd
+    #         --build-arg RUNTIMES="${ml-server-runtimes}"
+    #         --build-arg CBOS_VERSION=${common.common-base-os-version}
+    #         --build-arg COMMIT=${var.commithash}
+    #         --build-arg BUILD_DATE=${var.image-build-date}
+    #         --build-arg VERSION=${var.version}
+    #         --build-arg RSTATE=${var.rstate}
+    #         --build-arg IMAGE_PRODUCT_NUMBER=${common.argo-cd-image-product-number}
+    #         --build-arg IMAGE_PRODUCT_TITLE="${common.docker-image-title} KServe MLServer"
+    #         --build-arg ARGO_CD_VERSION=${common.argo-cd-version}
+    #         --build-arg CONTAINER_NAME="${common.docker-image-name}-kserve-argo-cd"
+    #         -t ${var.image-full-name-internal}-kserve-argo-cd:${var.version}
+    #         -t ${var.image-full-name}-kserve-argo-cd:${var.version}
+    #         ${common.argo-cd-path}
+    # - task: image-dr-check 
+    #   docker-image: adp-image-dr-check
+    #   docker-in-docker: socket 
+    #   cmd:
+    #   - mkdir -p ${image-checker-report-path}/argo-cd 
+    #   - image-dr-check --image "${var.image-full-name-internal}-kserve-argo-cd:${var.version}" --output ${image-checker-report-path}/argo-cd ${var.image-dr-vm-args}
+    # - task: cbo-check 
+    #   docker-image: adp-release-auto
+    #   docker-in-docker: socket
+    #   cmd: 
+    #     - cbo-check --debug --image "${var.image-full-name-internal}-kserve-argo-cd:${var.version}" --arm-apikey ${env.ARM_API_TOKEN} --report ${image-checker-report-path}
+
+    image-push-internal:
+    - task: push
+      cmd: ${env.PWD}/ci/scripts/push_images.sh
+            ${var.image-full-name-internal}-argo-cd:${var.version}
+        
+
+    # push largest image first, hoping that most of its layers would be reused by other images
+    image-push:
+    - task: push-public 
+      cmd: ${env.PWD}/ci/scripts/push_images.sh
+            ${var.image-full-name}-argo-cd:${var.version}
+
+
+    delete-images:
+    - task: delete
+      cmd: bash -c '''
+        set -eux -o pipefail;
+        images=(
+          ${var.image-full-name}-argo-cd:${var.version}
+          ${var.image-full-name-internal}-argo-cd:${var.version}
+        );
+
+        for image in "${images[@]}"; do
+          docker image remove --force $image || true;
+        done;
+        for image in $(docker images -f "dangling=true" -q); do
+          docker image remove --force $image || true;
+        done;'''
+
+    update-argo-cd-in-declarative-deployer:
+      - task: clone-declarative-deployer
+        cmd: ${env.PWD}/ci/scripts/clone.sh --repoURL "${declarative-deployer-repo-url}" --version "${declarative-deployer-version}" --clone-to "${declarative-deployer-path}"
+      - task: update-files
+        docker-image: ci-toolkit
+        cmd: ${env.PWD}/ci/scripts/update_files.sh "${declarative-deployer-path}" ${var.image-full-name}:${var.version}  "${changed-files}"
+      - task: update-version
+        docker-image: adp-release-auto
+        docker-in-docker: socket
+        docker-envs:
+          - GERRIT_USERNAME
+          - GERRIT_PASSWORD
+          - EMAIL
+        cmd: 
+          - ${env.PWD}/ci/scripts/create_change.sh "${declarative-deployer-path}" "${changed-files}" "${var.version}"

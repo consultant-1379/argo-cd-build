@@ -1,0 +1,248 @@
+#
+# COPYRIGHT Ericsson 2022
+#
+#
+#
+# The copyright to the computer program(s) herein is the property of
+#
+# Ericsson Inc. The programs may be used and/or copied only with written
+#
+# permission from Ericsson Inc. or in accordance with the terms and
+#
+# conditions stipulated in the agreement/contract under which the
+#
+# program(s) have been supplied.
+#
+
+modelVersion: 2.0
+
+description: "Declarative Deployer argocd Foss Tasks"
+
+# See image catalog: https://confluence.lmera.ericsson.se/display/ACD/ADP+CICD+Docker+Image+Catalog
+docker-images:
+    - adp-release-auto: armdocker.rnd.ericsson.se/proj-adp-cicd-drop/bob-adp-release-auto:${env.RELEASE_AUTO_TAG}
+    - adp-maven-builder: armdocker.rnd.ericsson.se/proj-adp-cicd-drop/bob-java11mvnbuilder:${env.MVN_BUILDER_TAG}
+    - adp-go-builder: armdocker.rnd.ericsson.se/proj-adp-cicd-drop/bob-gobuilder.adp-base-os:latest
+
+import:
+    common: common-properties.yaml
+
+properties:
+    # FOSSA
+    - fossa-server-endpoint: https://scasfossa.internal.ericsson.com/
+    - fossa-project-name: eric-aiml-declarative-deployer
+    
+    - fossa-argo-cd-project-name: ${fossa-project-name}-argo-cd
+    - fossa-argo-cd-ui-project-name: ${fossa-project-name}-argo-cd-ui
+
+    - fossa-argo-cd-report-name: fossa-argo-cd-report.json
+    - fossa-argo-cd-ui-report-name: fossa-argo-cd-ui-report.json
+
+    - fossa-team-name: aiml-mlops-mxe # Do we need to change this?
+    - docker-params: "--workdir ${env.PWD}"
+
+    - scas-product-id: "7753" # Do we need to change this?
+    - scas-product-version-id: "9951" # Do we need to change this?
+
+    - scas-name-scan-threshold: 90
+    - scas-version-scan-threshold: 90
+
+env:
+    - DOCKER_NETWORK (default=--network host)
+    - HOME
+    - PWD
+    - MAVEN_OPTS (default=-Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn)
+
+    # Default docker image tags
+    - MVN_BUILDER_TAG (default=latest)
+    - RELEASE_AUTO_TAG (default=latest)
+
+    # FOSSA
+    - FOSSA_ARTIFACT_HASH
+    - FOSSA_API_KEY
+
+    # SCAS
+    - SCAS_REFRESH_TOKEN
+
+var:
+    - version
+    - fossa-available
+
+rules:
+    clean:
+        - task: rm
+          cmd:
+              - rm -rf *${fossa-argo-cd-report-name}
+
+    fossa-server-check:
+        - task: check-status
+          docker-image: adp-release-auto
+          cmd:
+            - sh -c 'if curl ${fossa-server-endpoint}; then
+                echo "FOSSA server available.";
+                echo true > .bob/var.fossa-available;
+                else
+                echo "Unable to connect to FOSSA server. Skipping FOSSA Analysis.";
+                echo false > .bob/var.fossa-available;
+                fi'
+    
+    fossa-argo-cd-analyze:
+        - task: analyze
+          docker-image: adp-go-builder
+          docker-flags:
+              - ${docker-params}
+              - "--env FOSSA_API_KEY=${env.FOSSA_API_KEY}"
+              - "--env GOPATH=$PWD/build/go"
+              - "--env HOME=${env.HOME}"
+              - "--volume ${env.HOME}:${env.HOME}"
+          cmd: sh -c 'cd ${common.argo-cd-path};fossa analyze --revision ${var.version} --team ${fossa-team-name}  --endpoint ${fossa-server-endpoint} --project ${fossa-argo-cd-project-name} --exclude-path ./hack/ --exclude-path ./ui/ --exclude-path ./test/ --exclude-path ./assets/ --exclude-path ./docs/ --exclude-path ./examples/ --exclude-path ./tools/cmd-docs/ --exclude-path ./ui-test/' || true
+
+    fossa-argo-cd-ui-analyze:
+        - task: analyze
+          docker-image: adp-go-builder
+          docker-flags:
+              - ${docker-params}
+              - "--env FOSSA_API_KEY=${env.FOSSA_API_KEY}"
+              - "--env GOPATH=$PWD/build/go"
+              - "--env HOME=${env.HOME}"
+              - "--volume ${env.HOME}:${env.HOME}"
+          cmd: sh -c 'cd ${common.argo-cd-path}/ui;fossa analyze --revision ${var.version} --team ${fossa-team-name} --endpoint ${fossa-server-endpoint} --project ${fossa-argo-cd-ui-project-name}' || true          
+
+    fossa-argo-cd-scan-status-check:
+        - task: fossa-scan-status-check
+          docker-image: adp-release-auto
+          docker-flags:
+              - "--env FOSSA_API_KEY=${env.FOSSA_API_KEY}"
+          cmd: fossa_scan_status_check -s ${fossa-server-endpoint} -f custom -p ${fossa-argo-cd-project-name} -r ${var.version} -t ${env.FOSSA_API_KEY} -dl 15
+
+    fossa-argo-cd-ui-scan-status-check:
+        - task: fossa-scan-status-check-ui
+          docker-image: adp-release-auto
+          docker-flags:
+              - "--env FOSSA_API_KEY=${env.FOSSA_API_KEY}"
+          cmd: fossa_scan_status_check -s ${fossa-server-endpoint} -f custom -p ${fossa-argo-cd-ui-project-name} -r ${var.version} -t ${env.FOSSA_API_KEY} -dl 15          
+
+    fetch-argo-cd-fossa-report-attribution:
+        - task: fetch-fossa-report-attribution
+          docker-image: adp-maven-builder
+          docker-flags:
+              - "--env FOSSA_API_KEY=${env.FOSSA_API_KEY}"
+          cmd: fossa report attribution
+              --endpoint ${fossa-server-endpoint}
+              --project ${fossa-argo-cd-project-name}
+              --revision ${var.version} --json --timeout 15000 > ${fossa-argo-cd-report-name}    
+
+    fetch-argo-cd-ui-fossa-report-attribution:
+        - task: fetch-fossa-report-attribution-ui
+          docker-image: adp-maven-builder
+          docker-flags:
+              - "--env FOSSA_API_KEY=${env.FOSSA_API_KEY}"
+          cmd: fossa report attribution
+              --endpoint ${fossa-server-endpoint}
+              --project ${fossa-argo-cd-ui-project-name}
+              --revision ${var.version} --json --timeout 15000 > ${fossa-argo-cd-ui-report-name}    
+
+    dependency-argo-cd-update:
+        - task: dependency-update
+          docker-image: adp-release-auto
+          cmd: dependencies update
+              --fossa-report ${fossa-argo-cd-report-name}
+              --dependencies ${common.argo-cd-dependency-file-name}
+              --sort
+
+    dependency-argo-cd-ui-update:
+        - task: dependency-update-ui
+          docker-image: adp-release-auto
+          cmd: dependencies update
+              --fossa-report ${fossa-argo-cd-ui-report-name}
+              --dependencies ${common.argo-cd-ui-dependency-file-name}
+              --sort              
+    
+    scas-argo-cd-scan:
+        - task: scan-scas
+          docker-image: adp-release-auto
+          cmd: dependencies update
+              --fossa-report ${fossa-argo-cd-report-name}
+              --dependencies ${common.argo-cd-dependency-file-name}
+              --scan-scas
+              --scas-refresh-token ${env.SCAS_REFRESH_TOKEN}
+              --link-dependencies
+              --sort
+              --name-scan-threshold ${scas-name-scan-threshold}
+              --version-scan-threshold ${scas-version-scan-threshold}
+
+    scas-argo-cd-ui-scan:
+        - task: scan-scas-ui
+          docker-image: adp-release-auto
+          cmd: dependencies update
+              --fossa-report ${fossa-argo-cd-ui-report-name}
+              --dependencies ${common.argo-cd-ui-dependency-file-name}
+              --scan-scas
+              --scas-refresh-token ${env.SCAS_REFRESH_TOKEN}
+              --link-dependencies
+              --sort
+              --name-scan-threshold ${scas-name-scan-threshold}
+              --version-scan-threshold ${scas-version-scan-threshold}              
+
+    dependency-validate-argo-cd:
+        - task: dependency-validate-argo-cd
+          docker-image: adp-release-auto
+          cmd: dependencies validate
+              --dependencies ${common.argo-cd-dependency-file-name}
+              --allow-esw4
+
+    dependency-validate-argo-cd-ui:
+        - task: dependency-validate-argo-cd-ui
+          docker-image: adp-release-auto
+          cmd: dependencies validate
+              --dependencies ${common.argo-cd-ui-dependency-file-name}
+              --allow-esw4              
+
+    dependency-validate-2pps: 
+        - task: dependency-validate-2pps
+          docker-image: adp-release-auto
+          cmd: dependencies validate
+              --dependencies ${common.argo-cd-2pps-dependency-file-name}
+              --allow-esw4
+    
+    dependency-validate-3pps: 
+        - task: dependency-validate-3pps
+          docker-image: adp-release-auto
+          cmd: dependencies validate
+              --dependencies ${common.argo-cd-3pps-dependency-file-name}
+              --allow-esw4
+    
+    license-agreement-generate:
+        - task: license-agreement-generate-argo-cd
+          docker-image: adp-release-auto
+          cmd: license-agreement generate
+              --dependencies ${common.argo-cd-dependency-file-name}
+              --fossa-report ${fossa-argo-cd-report-name}
+              --output ${common.license-agreement-argo-cd-source-file-path}
+        - task: license-agreement-generate-argo-cd-ui
+          docker-image: adp-release-auto
+          cmd: license-agreement generate
+              --dependencies ${common.argo-cd-ui-dependency-file-name}
+              --fossa-report ${fossa-argo-cd-ui-report-name}
+              --output ${common.license-agreement-argo-cd-ui-source-file-path}              
+
+        # Generate license file for dependecy 3pps file manually
+        - task: merge
+          docker-image: adp-release-auto
+          cmd:
+           - mkdir -p $(dirname ${common.license-agreement-source-file-path}) 
+           - license-agreement merge
+              --license-agreement ${common.license-agreement-argo-cd-source-file-path}
+              --license-agreement ${common.license-agreement-argo-cd-ui-source-file-path}              
+              --license-agreement ${common.license-agreement-3pps-source-file-path}
+              --output ${common.license-agreement-source-file-path}
+
+    # WARNING: RUN ONLY MANUALLY THIS RULE
+    # Registration requests for ArgoUI are done manually
+    scas-register:
+        - task: scas-register-for-argo-cd
+          docker-image: adp-release-auto
+          cmd: dependencies register 
+                --dependencies  ${common.argo-cd-dependency-file-name} 
+                --scas --scas-refresh-token ${env.SCAS_REFRESH_TOKEN} 
+                --productid ${scas-product-id} --versionid ${scas-product-version-id}

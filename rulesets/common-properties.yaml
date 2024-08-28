@@ -1,0 +1,80 @@
+#
+# COPYRIGHT Ericsson 2024
+#
+#
+#
+# The copyright to the computer program(s) herein is the property of
+#
+# Ericsson Inc. The programs may be used and/or copied only with written
+#
+# permission from Ericsson Inc. or in accordance with the terms and
+#
+# conditions stipulated in the agreement/contract under which the
+#
+# program(s) have been supplied.
+#
+
+modelVersion: 2.0
+
+properties:
+      # Microservice docker image name
+    - docker-image-name: eric-aiml-declarative-deployer
+      # Microservice docker image title
+    - docker-image-title: 'Declarative Deployer'
+      # Microservice service name
+    - service-name: 'Declarative Deployer'
+    # Artifact Repositories
+    - arm_repo_path: https://arm.seli.gic.ericsson.se/artifactory
+      # Docker Repo Location
+    - image-registry-path: armdocker.rnd.ericsson.se/proj-mlops
+      # Docker Drop Repo Full Path
+    - image-drop-repopath: ${image-registry-path}-drop
+      # Docker Drop Image full name
+    - image-full-name: ${image-drop-repopath}/${docker-image-name}
+    # License Agreement JSON file name
+    - license-agreement-file-name: license-argo-cd-agreement.json
+    
+    ## tool versions
+    # Base OS version
+    - common-base-os-version: 6.14.0-10
+    # Stdout Redirect version
+    - stdout-redirect-version: 1.35.0
+    
+    # Dependencies
+    - argo-cd-dependency-file-name: config/fossa/dependencies.argo-cd.yaml
+    - argo-cd-ui-dependency-file-name: config/fossa/dependencies.argo-cd-ui.yaml    
+    - argo-cd-2pps-dependency-file-name: config/fossa/dependencies.argo-cd.2pp.yaml
+    - argo-cd-3pps-dependency-file-name: config/fossa/dependencies.argo-cd.3pp.yaml
+
+    # License Agreement JSON file name
+    - license-agreement-file-name: license-agreement.json
+    # License Agreement JSON file path
+    - license-agreement-source-file-path: config/fragments/${license-agreement-file-name}
+    - license-agreement-argo-cd-source-file-path: config/fossa/license-agreement-argo-cd.json
+    - license-agreement-argo-cd-ui-source-file-path: config/fossa/license-agreement-argo-cd-ui.json    
+    - license-agreement-3pps-source-file-path: config/fossa/license-agreement-3pp.json
+
+    # 3pp details
+    - argo-cd-version: v2.10.7
+    - argo-cd-repo-url: ssh://gerrit.ericsson.se:29418/MXE/mlops-3pps/argo-cd
+    - argo-cd-path: .bob/3pps/argo-cd
+
+    # Parent Microservice Repo
+    - model-lcm-repo-url: ssh://gerrit.ericsson.se:29418/MXE/model-lcm
+    - model-lcm-branch: develop
+    - model-lcm-path: .bob/model-lcm
+
+    # Gui build
+    - node-version: 18.20.1
+    - npm-version: 18.20.1
+    - yarn-version: v1.22.19
+
+    # Image User Ids:
+    - argo-cd-image-user-id : 260113
+
+    # Image Product Numbers:
+    - argo-cd-image-product-number : CXU1012601
+
+var:
+  - helm-version
+
